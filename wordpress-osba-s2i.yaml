@@ -1,0 +1,220 @@
+---
+kind: Template
+apiVersion: v1
+metadata:
+  name: wordpress-mysql-example
+  annotations:
+    openshift.io/display-name: WordPress + Azure MySQL (OSBA)
+    description: |-
+      An example WordPress application with Azure MySQL database.For more information about using this template, including OpenShift considerations, see https://github.com/openshift/origin/blob/master/examples/wordpress/template/README.md.
+
+      NOTE: The MySQL service created by this template uses non-persistent storage. To setup persisted storage, change this template to use a persistent volume claim instead of emptydir.
+    tags: instant-app,php,wordpress
+    iconClass: icon-php
+message: |-
+  The following service(s) have been created in your project: ${NAME}.
+
+  For more information about using this template, including OpenShift considerations, see https://github.com/openshift/origin/blob/master/examples/wordpress/template/README.md.
+labels:
+  template: wordpress-mysql-example
+objects:
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: wordpress-mysql-example
+    annotations:
+      description: Exposes and load balances the application pods
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      targetPort: 8080
+    selector:
+      name: wordpress-mysql-example
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: wordpress-mysql-example
+    annotations:
+      template.openshift.io/expose-uri: http://{.spec.host}{.spec.path}
+  spec:
+    host: "${APPLICATION_DOMAIN}"
+    to:
+      kind: Service
+      name: wordpress-mysql-example
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    name: wordpress-mysql-example
+    annotations:
+      description: Keeps track of changes in the application image
+- kind: BuildConfig
+  apiVersion: v1
+  metadata:
+    name: wordpress-mysql-example
+    annotations:
+      description: Defines how to build the application
+      template.alpha.openshift.io/wait-for-ready: 'true'
+  spec:
+    source:
+      type: Git
+      git:
+        uri: "${SOURCE_REPOSITORY_URL}"
+        ref: "${SOURCE_REPOSITORY_REF}"
+      contextDir: "${CONTEXT_DIR}"
+    strategy:
+      type: Source
+      sourceStrategy:
+        from:
+          kind: ImageStreamTag
+          namespace: openshift
+          name: php:5.5
+    output:
+      to:
+        kind: ImageStreamTag
+        name: wordpress-mysql-example:latest
+    triggers:
+    - type: ImageChange
+    - type: ConfigChange
+    - type: GitHub
+      github:
+        secret: "${GITHUB_WEBHOOK_SECRET}"
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: wordpress-mysql-example
+    annotations:
+      description: Defines how to deploy the application server
+      template.alpha.openshift.io/wait-for-ready: 'true'
+  spec:
+    strategy:
+      type: Rolling
+    triggers:
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+        - wordpress-mysql-example
+        from:
+          kind: ImageStreamTag
+          name: wordpress-mysql-example:latest
+    - type: ConfigChange
+    replicas: 1
+    selector:
+      name: wordpress-mysql-example
+    template:
+      metadata:
+        name: wordpress-mysql-example
+        labels:
+          name: wordpress-mysql-example
+      spec:
+        containers:
+        - name: wordpress-mysql-example
+          image: wordpress-mysql-example
+          ports:
+          - containerPort: 8080
+          env:
+          - name: DATABASE_SERVICE_NAME
+            value: "${DATABASE_SERVICE_NAME}"
+          - name: DB_HOST
+            valueFrom:
+              secretKeyRef:
+                key: host
+                name: wordpress-mysql-secret
+          - name: DB_NAME
+            valueFrom:
+              secretKeyRef:
+                key: database
+                name: wordpress-mysql-secret
+          - name: DB_USER
+            valueFrom:
+              secretKeyRef:
+                key: username
+                name: wordpress-mysql-secret
+          - name: DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: password
+                name: wordpress-mysql-secret
+          volumeMounts:
+          - name: "${DATABASE_SERVICE_NAME}-data"
+            mountPath: "/var/lib/mysql/data"
+        volumes:
+        - name: "${DATABASE_SERVICE_NAME}-data"
+          emptyDir:
+            medium: ''
+- kind: ServiceBinding
+  apiVersion: servicecatalog.k8s.io/v1beta1
+  metadata:
+    name: wordpress-mysql-binding
+    labels:
+      app: wordpress
+  spec:
+    instanceRef:
+      name: wordpress-mysql-instance
+    secretName: wordpress-mysql-secret
+- kind: ServiceInstance
+  apiVersion: servicecatalog.k8s.io/v1beta1
+  metadata:
+    name: wordpress-mysql-instance
+    labels:
+      app: wordpress
+  spec:
+    clusterServiceClassExternalName: ${SERVICE_CLASS}
+    clusterServicePlanExternalName: ${SERVICE_PLAN}
+    parameters:
+      location: ${LOCATION}
+      resourceGroup: ${RESOURCE_GROUP}
+      sslEnforcement: ${SSL_ENFORCEMENT}
+      firewallRules:
+      - startIPAddress: "0.0.0.0"
+        endIPAddress: "255.255.255.255"
+        name: "AllowAll"
+parameters:
+- name: SOURCE_REPOSITORY_URL
+  description: The URL of the repository with your application source code
+  value: https://github.com/sozercan/wordpress.git
+- name: SOURCE_REPOSITORY_REF
+  description: Set this to a branch name, tag or other ref of your repository if you
+    are not using the default branch
+  value: 4.9-branch
+- name: CONTEXT_DIR
+  description: Set this to the relative path to your project if it is not in the root
+    of your repository
+- name: APPLICATION_DOMAIN
+  description: The exposed hostname that will route to the wordpress service, if left
+    blank a value will be defaulted.
+  value: ''
+- name: GITHUB_WEBHOOK_SECRET
+  description: Github trigger secret.  A difficult to guess string encoded as part
+    of the webhook URL.  Not encrypted.
+  generate: expression
+  from: "[a-zA-Z0-9]{40}"
+- name: DATABASE_SERVICE_NAME
+  description: Database service name
+  value: mysql
+- name: DATABASE_NAME
+  description: Database name
+  value: wordpress
+- name: DATABASE_USER
+  description: Database user name
+  value: wordpress
+- name: DATABASE_PASSWORD
+  description: Database user password
+  generate: expression
+  from: "[a-zA-Z0-9]{16}"
+- name: LOCATION
+  description: location
+  value: eastus
+- name: RESOURCE_GROUP
+  description: Resource group
+  value: default
+- name: SSL_ENFORCEMENT
+  description: SSL enforcement
+  value: disabled
+- name: SERVICE_CLASS
+  description: Service class
+  value: azure-mysql
+- name: SERVICE_PLAN
+  description: Service plan
+  value: standard100
